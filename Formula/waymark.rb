@@ -5,8 +5,8 @@ class Waymark < Formula
   version "0.1.0-nightly-e5db17b"
   sha256 "25ac5f93c01293625ba52fb3de32f2c9f53be19da2596c8b2205f45f4eb3ed58"
 
-  depends_on :macos
   depends_on arch: :arm64
+  depends_on :macos
 
   def install
     bin.install "waymark"
