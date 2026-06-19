@@ -2,8 +2,8 @@ class Waymark < Formula
   desc "Zsh-first CLI for file and directory frecency tracking"
   homepage "https://github.com/zhyu/waymark"
   url "https://github.com/zhyu/waymark/releases/download/nightly/waymark-macos-arm64.tar.gz"
-  version "0.1.0-nightly.20260618104841.1"
-  sha256 "66e27970c0dfddcb9a7319b42f1c3bc05415e6667e48e7cff3ef4957241f0be1"
+  version "0.1.0-nightly.20260619035837.1"
+  sha256 "72c1f4d72a5e9700f12da891db9925c78b7056d334cf594044506caec7cb8cca"
 
   depends_on arch: :arm64
   depends_on :macos
