@@ -1,0 +1,247 @@
+name: Update waymark
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-waymark
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Mirror verified nightly and update formula
+    if: github.repository == 'zhyu/homebrew-tap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAP_REPO: ${{ github.repository }}
+      SOURCE_REPO: zhyu/waymark
+      ARCHIVE_NAME: waymark-macos-arm64.tar.gz
+
+    steps:
+      - name: Check out tap
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify and mirror source snapshot
+        id: generate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          public_api() {
+            curl --fail --location --retry 3 --silent --show-error \
+              --header "Accept: application/vnd.github+json" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$@"
+          }
+
+          download_public_asset() {
+            curl --fail --location --retry 3 --silent --show-error \
+              --header "Accept: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$@"
+          }
+
+          source_release_url="https://api.github.com/repos/$SOURCE_REPO/releases/tags/nightly"
+          source_tag_url="https://api.github.com/repos/$SOURCE_REPO/git/ref/tags/nightly"
+          release_json="$(public_api "$source_release_url")"
+          tag_json="$(public_api "$source_tag_url")"
+
+          jq -e '
+            .tag_name == "nightly"
+            and .draft == false
+            and .prerelease == true
+          ' <<<"$release_json" >/dev/null
+
+          target_sha="$(jq -r '.target_commitish' <<<"$release_json")"
+          tag_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$(jq -r '.object.type' <<<"$tag_json")" = "commit"
+          test "$tag_sha" = "$target_sha"
+
+          release_updated_at="$(jq -r '.updated_at' <<<"$release_json")"
+          release_updated_epoch="$(date --date="$release_updated_at" +%s)"
+          current_epoch="$(date +%s)"
+          if (( current_epoch - release_updated_epoch < 120 )); then
+            echo "Nightly release is still inside its two-minute publication quiet window."
+            exit 0
+          fi
+
+          checksum_name="$ARCHIVE_NAME.sha256"
+          test "$(jq --arg name "$ARCHIVE_NAME" '[.assets[] | select(.name == $name and .state == "uploaded")] | length' <<<"$release_json")" -eq 1
+          test "$(jq --arg name "$checksum_name" '[.assets[] | select(.name == $name and .state == "uploaded")] | length' <<<"$release_json")" -eq 1
+
+          archive_id="$(jq -r --arg name "$ARCHIVE_NAME" '.assets[] | select(.name == $name) | .id' <<<"$release_json")"
+          archive_digest="$(jq -r --arg name "$ARCHIVE_NAME" '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
+          archive_updated_at="$(jq -r --arg name "$ARCHIVE_NAME" '.assets[] | select(.name == $name) | .updated_at' <<<"$release_json")"
+          archive_size="$(jq -r --arg name "$ARCHIVE_NAME" '.assets[] | select(.name == $name) | .size' <<<"$release_json")"
+          checksum_id="$(jq -r --arg name "$checksum_name" '.assets[] | select(.name == $name) | .id' <<<"$release_json")"
+          checksum_digest="$(jq -r --arg name "$checksum_name" '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
+          checksum_updated_at="$(jq -r --arg name "$checksum_name" '.assets[] | select(.name == $name) | .updated_at' <<<"$release_json")"
+          checksum_size="$(jq -r --arg name "$checksum_name" '.assets[] | select(.name == $name) | .size' <<<"$release_json")"
+
+          [[ "$archive_id" =~ ^[0-9]+$ ]]
+          [[ "$checksum_id" =~ ^[0-9]+$ ]]
+          [[ "$archive_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$checksum_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$archive_size" =~ ^[0-9]+$ ]] && test "$archive_size" -gt 0
+          [[ "$checksum_size" =~ ^[0-9]+$ ]] && test "$checksum_size" -gt 0
+
+          archive_updated_epoch="$(date --date="$archive_updated_at" +%s)"
+          checksum_updated_epoch="$(date --date="$checksum_updated_at" +%s)"
+          timestamp_delta() {
+            local left="$1"
+            local right="$2"
+            local delta=$((left - right))
+            if (( delta < 0 )); then
+              delta=$((-delta))
+            fi
+            printf '%s\n' "$delta"
+          }
+          test "$(timestamp_delta "$archive_updated_epoch" "$release_updated_epoch")" -le 120
+          test "$(timestamp_delta "$checksum_updated_epoch" "$release_updated_epoch")" -le 120
+          test "$(timestamp_delta "$archive_updated_epoch" "$checksum_updated_epoch")" -le 120
+
+          temporary="$(mktemp -d)"
+          trap 'rm -rf "$temporary"' EXIT
+          archive_path="$temporary/$ARCHIVE_NAME"
+          checksum_path="$temporary/$checksum_name"
+          download_public_asset --output "$archive_path" \
+            "https://api.github.com/repos/$SOURCE_REPO/releases/assets/$archive_id"
+          download_public_asset --output "$checksum_path" \
+            "https://api.github.com/repos/$SOURCE_REPO/releases/assets/$checksum_id"
+
+          test "$(wc -c < "$archive_path")" -eq "$archive_size"
+          test "$(wc -c < "$checksum_path")" -eq "$checksum_size"
+
+          actual_archive_digest="sha256:$(shasum -a 256 "$archive_path" | awk '{ print $1 }')"
+          actual_checksum_digest="sha256:$(shasum -a 256 "$checksum_path" | awk '{ print $1 }')"
+          test "$actual_archive_digest" = "$archive_digest"
+          test "$actual_checksum_digest" = "$checksum_digest"
+
+          test "$(wc -l < "$checksum_path")" -eq 1
+          read -r manifest_hash manifest_name extra < "$checksum_path"
+          test -z "${extra:-}"
+          test "$manifest_name" = "$ARCHIVE_NAME"
+          [[ "$manifest_hash" =~ ^[0-9a-f]{64}$ ]]
+          test "sha256:$manifest_hash" = "$archive_digest"
+          archive_entries="$(tar -tzf "$archive_path")"
+          grep -Fx "waymark-macos-arm64/waymark" \
+            <<<"$archive_entries" >/dev/null
+
+          release_after="$(public_api "$source_release_url")"
+          tag_after="$(public_api "$source_tag_url")"
+          before_fingerprint="$(jq -Sc '{id, tag_name, target_commitish, draft, prerelease, updated_at, assets: [.assets[] | {id, name, state, digest, updated_at}] | sort_by(.id)}' <<<"$release_json")"
+          after_fingerprint="$(jq -Sc '{id, tag_name, target_commitish, draft, prerelease, updated_at, assets: [.assets[] | {id, name, state, digest, updated_at}] | sort_by(.id)}' <<<"$release_after")"
+          test "$before_fingerprint" = "$after_fingerprint"
+          test "$(jq -r '.object.sha' <<<"$tag_after")" = "$tag_sha"
+
+          mirror_tag="waymark-nightly-$archive_id"
+          mirror_complete=false
+          if gh release view "$mirror_tag" --repo "$TAP_REPO" >/dev/null 2>&1; then
+            mirror_json="$(gh release view "$mirror_tag" --repo "$TAP_REPO" --json tagName,isDraft,isPrerelease,assets)"
+            mirror_archive_count="$(jq --arg name "$ARCHIVE_NAME" --arg digest "$archive_digest" '[.assets[] | select(.name == $name and .state == "uploaded" and .digest == $digest)] | length' <<<"$mirror_json")"
+            mirror_checksum_count="$(jq --arg name "$checksum_name" --arg digest "$checksum_digest" '[.assets[] | select(.name == $name and .state == "uploaded" and .digest == $digest)] | length' <<<"$mirror_json")"
+            if test "$(jq -r '.tagName' <<<"$mirror_json")" = "$mirror_tag" \
+              && test "$(jq -r '.isDraft' <<<"$mirror_json")" = "false" \
+              && test "$(jq -r '.isPrerelease' <<<"$mirror_json")" = "true" \
+              && test "$mirror_archive_count" -eq 1 \
+              && test "$mirror_checksum_count" -eq 1 \
+              && test "$(jq '.assets | length' <<<"$mirror_json")" -eq 2; then
+              mirror_complete=true
+            fi
+          fi
+
+          if test "$mirror_complete" != true; then
+            if gh release view "$mirror_tag" --repo "$TAP_REPO" >/dev/null 2>&1; then
+              if test -f Formula/waymark.rb \
+                && grep -Fq "/$mirror_tag/" Formula/waymark.rb; then
+                echo "Refusing to replace an incomplete mirror referenced by the formula." >&2
+                exit 1
+              fi
+              gh release delete "$mirror_tag" --repo "$TAP_REPO" --yes --cleanup-tag
+            fi
+            gh release create "$mirror_tag" "$archive_path" "$checksum_path" \
+              --repo "$TAP_REPO" \
+              --title "waymark nightly $archive_id" \
+              --notes "Verified mirror of $SOURCE_REPO nightly asset $archive_id from $target_sha." \
+              --prerelease \
+              --latest=false \
+              --target main
+          fi
+
+          mirror_json="$(gh release view "$mirror_tag" --repo "$TAP_REPO" --json assets)"
+          test "$(jq --arg name "$ARCHIVE_NAME" --arg digest "$archive_digest" '[.assets[] | select(.name == $name and .state == "uploaded" and .digest == $digest)] | length' <<<"$mirror_json")" -eq 1
+          test "$(jq --arg name "$checksum_name" --arg digest "$checksum_digest" '[.assets[] | select(.name == $name and .state == "uploaded" and .digest == $digest)] | length' <<<"$mirror_json")" -eq 1
+
+          package_version="$(
+            curl --fail --location --retry 3 --silent --show-error \
+              "https://raw.githubusercontent.com/$SOURCE_REPO/$target_sha/Cargo.toml" \
+              | awk -F '"' '/^version = / { print $2 }'
+          )"
+          [[ "$package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          release_timestamp="$(tr -cd '0-9' <<<"$archive_updated_at")"
+          [[ "$release_timestamp" =~ ^[0-9]{14}$ ]]
+          formula_version="${package_version}-nightly.${release_timestamp}.${archive_id}"
+
+          cat > Formula/waymark.rb <<EOF
+          class Waymark < Formula
+            desc "Zsh-first CLI for file and directory frecency tracking"
+            homepage "https://github.com/zhyu/waymark"
+            url "https://github.com/$TAP_REPO/releases/download/$mirror_tag/$ARCHIVE_NAME"
+            version "$formula_version"
+            sha256 "$manifest_hash"
+
+            depends_on arch: :arm64
+            depends_on :macos
+
+            def install
+              bin.install "waymark"
+            end
+
+            test do
+              assert_match "waymark", shell_output("#{bin}/waymark init zsh")
+            end
+          end
+          EOF
+
+          ruby -c Formula/waymark.rb
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit formula update
+        if: steps.generate.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add Formula/waymark.rb
+          if git diff --cached --quiet; then
+            echo "Formula already matches the mirrored nightly."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          version="$(awk -F '"' '/^[[:space:]]*version / { print $2; exit }' Formula/waymark.rb)"
+          git commit -m "Update waymark to $version"
+
+          attempt=1
+          while [ "$attempt" -le 3 ]; do
+            git pull --rebase origin main
+            if git push origin main; then
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            sleep 2
+          done
+          echo "Failed to update the tap after 3 attempts." >&2
+          exit 1
