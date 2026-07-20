@@ -1,4 +1,6 @@
 class Roused < Formula
+  SERVICE_LABEL = "io.github.zhyu.roused".freeze
+
   desc "Activation reverse proxy for macOS LaunchAgents"
   homepage "https://github.com/zhyu/roused"
   url "https://github.com/zhyu/homebrew-tap/releases/download/roused-nightly-482384431/roused-macos-arm64.tar.gz"
@@ -18,9 +20,9 @@ class Roused < Formula
     log_dir = var/"log/roused"
     log_dir.mkpath
     system bin/"roused", "init-gateway-plist",
-           "--label", plist_name,
+           "--label", SERVICE_LABEL,
            "--config", pkgetc/"roused.toml",
-           "--output", prefix/"#{plist_name}.plist",
+           "--output", prefix/"#{SERVICE_LABEL}.plist",
            "--log-dir", log_dir,
            "--program", opt_bin/"roused"
   end
@@ -45,7 +47,7 @@ class Roused < Formula
   end
 
   service do
-    name macos: "homebrew.mxcl.roused"
+    name macos: SERVICE_LABEL
   end
 
   test do
@@ -55,9 +57,9 @@ class Roused < Formula
     system bin/"roused", "init-config", generated_config
     system bin/"roused", "check-config", generated_config
 
-    service_file = prefix/"#{plist_name}.plist"
+    service_file = prefix/"#{SERVICE_LABEL}.plist"
     system "/usr/bin/plutil", "-lint", service_file
-    assert_match "<string>#{plist_name}</string>", service_file.read
+    assert_match "<string>#{SERVICE_LABEL}</string>", service_file.read
     assert_match "<string>#{opt_bin}/roused</string>", service_file.read
     assert_match "<string>#{pkgetc}/roused.toml</string>", service_file.read
   end
