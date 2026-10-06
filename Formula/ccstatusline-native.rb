@@ -1,9 +1,9 @@
 class CcstatuslineNative < Formula
   desc "Fast native renderer for ccstatusline configurations"
   homepage "https://github.com/zhyu/ccstatusline-native"
-  url "https://github.com/zhyu/homebrew-tap/releases/download/ccstatusline-native-nightly-473555000/ccstatusline-native-macos-arm64.tar.gz"
-  version "0.2.0-nightly.20260711142833.473555000"
-  sha256 "d4ee55faffa5107e4d69a1e3378b8d75801717a92be24a3c1ab1deb8bcff1e66"
+  url "https://github.com/zhyu/homebrew-tap/releases/download/ccstatusline-native-nightly-616262737/ccstatusline-native-macos-arm64.tar.gz"
+  version "0.2.0-nightly.20261006180446.616262737"
+  sha256 "c1690a9931673783801080003a2435bc2a2f1f07feae666f35bbdbbb14aea462"
   license "MIT"
 
   depends_on arch: :arm64
