@@ -3,9 +3,9 @@ class Roused < Formula
 
   desc "Activation reverse proxy for macOS LaunchAgents"
   homepage "https://github.com/zhyu/roused"
-  url "https://github.com/zhyu/homebrew-tap/releases/download/roused-nightly-486046944/roused-macos-arm64.tar.gz"
-  version "0.1.0-nightly.20260722142817.486046944"
-  sha256 "93e5a7eb366c4c2d329bb0723e815158fe72c28d0e723e1a82d20aa14e745db1"
+  url "https://github.com/zhyu/homebrew-tap/releases/download/roused-nightly-661129883/roused-macos-arm64.tar.gz"
+  version "0.1.0-nightly.20261021023438.661129883"
+  sha256 "ecfcae05caf6d98316dc978a340db992f814575647d632f9a75d7cf4f489ecd7"
 
   depends_on arch: :arm64
   depends_on :macos
