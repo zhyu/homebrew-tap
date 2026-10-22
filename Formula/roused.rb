@@ -15,7 +15,8 @@ class Roused < Formula
 
     generated_config = buildpath/"roused.toml"
     system bin/"roused", "init-config", generated_config
-    pkgetc.install generated_config
+    # Preserve an operator-edited configuration across upgrades.
+    pkgetc.install generated_config unless (pkgetc/"roused.toml").exist?
 
     log_dir = var/"log/roused"
     log_dir.mkpath
@@ -36,8 +37,9 @@ class Roused < Formula
         roused check-config #{pkgetc}/roused.toml
         brew services start roused
 
-      Roused also validates this file when formula upgrades regenerate the plist,
-      so an invalid configuration will block an upgrade until it is corrected.
+      The existing configuration is preserved across upgrades. Roused validates
+      it when an upgrade regenerates the plist, so an invalid configuration
+      will block an upgrade until it is corrected.
 
       Do not use sudo; Roused only supports current-user LaunchAgents.
 
